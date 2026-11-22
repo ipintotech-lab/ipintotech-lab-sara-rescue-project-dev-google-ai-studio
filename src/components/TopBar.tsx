@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pause, Play, Radio, SlidersHorizontal } from 'lucide-react';
+import { FolderOpen, Pause, Play, Radio, SlidersHorizontal, Video } from 'lucide-react';
 import type { EventState, ViewRoute } from '../types/sara';
 import { clockStr, fT, orderedHits } from '../sim/engine';
 
@@ -10,6 +10,11 @@ interface TopBarProps {
   t: number;
   running: boolean;
   speed: number;
+  driveConnected: boolean;
+  driveFileCount: number;
+  meetCount: number;
+  onOpenDrivePicker: () => void;
+  onOpenMeet: () => void;
   onNavigate: (v: ViewRoute, bid?: number) => void;
   onSelectBuilding: (id: number) => void;
   onSetSpeed: (speed: number, running: boolean) => void;
@@ -23,6 +28,11 @@ export function TopBar({
   t,
   running,
   speed,
+  driveConnected,
+  driveFileCount,
+  meetCount,
+  onOpenDrivePicker,
+  onOpenMeet,
   onNavigate,
   onSelectBuilding,
   onSetSpeed,
@@ -216,9 +226,45 @@ export function TopBar({
             ) : (
               <div className="flex items-center gap-2 text-xs text-[#929ba2] whitespace-nowrap">
                 <Radio className="w-3.5 h-3.5 text-[#929ba2]" />
-                <span>Field kit · Demo</span>
+                <span className="hidden sm:inline">Field kit · Demo</span>
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={onOpenDrivePicker}
+              className="inline-flex items-center gap-1.5 min-h-[34px] px-2.5 py-1 rounded-md bg-[#1b2024] border border-[#2c3338] hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer whitespace-nowrap"
+              title="Open Google Picker for Google Drive files"
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  driveConnected ? 'bg-[#34a853]' : 'bg-[#929ba2]'
+                }`}
+                aria-hidden="true"
+              />
+              <FolderOpen className="w-3.5 h-3.5 text-[#45c4ea]" />
+              <span className="hidden sm:inline">Drive Picker</span>
+              {driveFileCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-[#10303a] text-[#9be5fa] text-[10.5px] font-semibold tabular-nums">
+                  {driveFileCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={onOpenMeet}
+              className="inline-flex items-center gap-1.5 min-h-[34px] px-2.5 py-1 rounded-md bg-[#1b2024] border border-[#2c3338] hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer whitespace-nowrap"
+              title="Open Google Meet briefings"
+            >
+              <Video className="w-3.5 h-3.5 text-[#45c4ea]" />
+              <span className="hidden sm:inline">Meet</span>
+              {meetCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-[#10303a] text-[#9be5fa] text-[10.5px] font-semibold tabular-nums">
+                  {meetCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 

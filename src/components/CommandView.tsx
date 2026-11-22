@@ -23,11 +23,29 @@ import {
   rng,
 } from '../sim/engine';
 import { applyWorldLayers, bAt, fitVB, svgPt, worldSVG } from '../sim/renderers';
+import { createSearchedLocationPack } from '../lib/mapsConfig';
+import {
+  CommandLocationPreviewMap,
+  CommandStep2GoogleMap,
+  GoogleAddressSearchBar,
+  type SearchedPlaceResult,
+} from './GoogleMapsPanes';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { SeverityChip, SimulatedBadge, StatusChip } from './StatusChip';
+import type { MeetSpaceItem, PickedDriveFile } from '../types/sara';
 
 interface CommandViewProps {
   ev: EventState | null;
   t: number;
+  driveNeedsAuth: boolean;
+  driveSigningIn: boolean;
+  drivePicking: boolean;
+  driveFiles: PickedDriveFile[];
+  meetSpaces: MeetSpaceItem[];
+  onGoogleSignIn: () => void;
+  onOpenPicker: (buildingId?: number | null) => void;
+  onOpenDriveDrawer: () => void;
+  onOpenMeetDrawer: () => void;
   onStartEvent: (ev: EventState, goToArea: boolean) => void;
   onLoadDemo: () => void;
   onOpenArea: () => void;
@@ -37,6 +55,15 @@ interface CommandViewProps {
 export function CommandView({
   ev,
   t,
+  driveNeedsAuth,
+  driveSigningIn,
+  drivePicking,
+  driveFiles,
+  meetSpaces,
+  onGoogleSignIn,
+  onOpenPicker,
+  onOpenDriveDrawer,
+  onOpenMeetDrawer,
   onStartEvent,
   onLoadDemo,
   onOpenArea,
@@ -44,7 +71,7 @@ export function CommandView({
 }: CommandViewProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [eventType, setEventType] = useState<EventType>('Missile strike');
-  const [locQuery, setLocQuery] = useState('');
+  const [searchedPlace, setSearchedPlace] = useState<SearchedPlaceResult | null>(null);
   const [selectedLoc, setSelectedLoc] = useState<LocationPack | null>(null);
   const [city, setCity] = useState<CityModel | null>(null);
   const [eventDate, setEventDate] = useState('2026-11-20T13:29');
@@ -53,7 +80,7 @@ export function CommandView({
 
   // Step 2 map state
   const [tool, setTool] = useState<'select' | 'poly'>('select');
-  const [mapMode, setMapMode] = useState<'pre' | 'gis'>('pre');
+  const [mapMode, setMapMode] = useState<'pre' | 'gis' | 'gmap'>('pre');
   const [sel, setSel] = useState<Map<number, SeverityKey>>(() => new Map());
   const [poly, setPoly] = useState<[number, number][]>([]);
   const [polyClosed, setPolyClosed] = useState(false);
@@ -70,20 +97,26 @@ export function CommandView({
     moved: boolean;
   } | null>(null);
 
-  const filteredLocs = useMemo(() => {
-    const q = locQuery.trim().toLowerCase().split(',')[0].trim();
-    if (!q) return LOCS;
-    return LOCS.filter((l) =>
-      `${l.name} ${l.h.join(' ')} ${l.v.join(' ')}`.toLowerCase().includes(q)
-    );
-  }, [locQuery]);
-
-  const pickLoc = (loc: LocationPack) => {
+  const pickLoc = (loc: LocationPack, fromSearch = false) => {
+    if (!fromSearch) {
+      setSearchedPlace(null);
+    }
     setSelectedLoc(loc);
     setCity(genCity(loc));
     setSel(new Map());
     setPoly([]);
     setPolyClosed(false);
+  };
+
+  const handleSelectSearchedPlace = (place: SearchedPlaceResult) => {
+    setSearchedPlace(place);
+    const customLoc = createSearchedLocationPack({
+      name: place.name,
+      formattedAddress: place.formattedAddress,
+      lat: place.lat,
+      lng: place.lng,
+    });
+    pickLoc(customLoc, true);
   };
 
   // Initialize SVG world when entering step 2
@@ -208,6 +241,12 @@ export function CommandView({
       .sort((a, b) => a.b.addr.localeCompare(b.b.addr, undefined, { numeric: true }));
   }, [city, sel]);
 
+  const selectedRecord = useMemo(() => {
+    const rec: Record<number, SeverityKey> = {};
+    for (const [id, sv] of sel.entries()) rec[id] = sv;
+    return rec;
+  }, [sel]);
+
   const totalFlats = selectedRows.reduce((a, x) => a + x.b.units, 0);
 
   const handleInitiate = () => {
@@ -280,7 +319,7 @@ export function CommandView({
         </p>
 
         <p className="text-xs text-[#929ba2] mt-auto pt-3 border-t border-[#2c3338]/70 hidden lg:block">
-          Simulated data throughout. Locations are in Israel only. Live map tiles are not loaded in this demo.
+          Simulated C2 data throughout. Israel locations; live Google Maps & Street View active when online (non-operational demo only).
         </p>
       </aside>
 
@@ -341,23 +380,36 @@ export function CommandView({
 
             <div className="flex flex-col gap-2">
               <label htmlFor="qloc" className="text-xs text-[#929ba2]">
-                Location in Israel: address, neighborhood or city
+                Search any address on Google Maps (street, landmark, or city)
               </label>
-              <input
+              <GoogleAddressSearchBar
                 id="qloc"
-                value={locQuery}
-                onChange={(e) => setLocQuery(e.target.value)}
-                placeholder="e.g. Bat Yam, Balfour"
-                autoComplete="off"
-                className="min-h-[44px] bg-[#1b2024] border border-[#2c3338] rounded-md px-3 py-2 text-sm text-[#e7eaec] focus-visible:outline-2 focus-visible:outline-[#45c4ea]"
+                placeholder="Search any address, e.g. 12 Rothschild Blvd, Tel Aviv…"
+                onSelectPlace={handleSelectSearchedPlace}
               />
+
+              {searchedPlace && selectedLoc && selectedLoc.id.startsWith('search-') && (
+                <div className="px-3 py-2 rounded-md border border-[#45c4ea] bg-[#2d3a42] text-white text-xs flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm truncate">{searchedPlace.name}</div>
+                    <div className="text-[#cdeefb] truncate">
+                      {searchedPlace.formattedAddress}
+                    </div>
+                  </div>
+                  <span className="text-[11px] text-[#9be5fa] shrink-0">Google Maps</span>
+                </div>
+              )}
+
+              <div className="text-[11px] text-[#929ba2] pt-1">
+                Quick-pick demo sector packs (Israel)
+              </div>
               <div className="flex flex-col gap-1.5">
-                {(filteredLocs.length ? filteredLocs : LOCS).map((loc) => (
+                {LOCS.map((loc) => (
                   <button
                     key={loc.id}
                     type="button"
                     onClick={() => pickLoc(loc)}
-                    className={`min-h-[44px] flex items-center justify-between gap-3 px-3 py-2 rounded-md border text-left text-sm cursor-pointer transition-colors ${
+                    className={`min-h-[42px] flex items-center justify-between gap-3 px-3 py-2 rounded-md border text-left text-sm cursor-pointer transition-colors ${
                       selectedLoc?.id === loc.id
                         ? 'bg-[#2d3a42] border-[#45c4ea] text-white'
                         : 'bg-[#1b2024] border-[#2c3338] text-[#e7eaec] hover:border-[#46515a]'
@@ -367,11 +419,6 @@ export function CommandView({
                     <span className="text-xs text-[#929ba2] shrink-0">Israel</span>
                   </button>
                 ))}
-                {filteredLocs.length === 0 && (
-                  <div className="text-xs text-[#929ba2]">
-                    No offline pack for &ldquo;{locQuery}&rdquo; yet. Closest Israel packs shown.
-                  </div>
-                )}
               </div>
             </div>
 
@@ -396,7 +443,11 @@ export function CommandView({
                 <select
                   id="esrc"
                   value={srcIdx}
-                  onChange={(e) => setSrcIdx(Number(e.target.value))}
+                  onChange={(e) => {
+                    const nextIdx = Number(e.target.value);
+                    setSrcIdx(nextIdx);
+                    if (nextIdx === 2) setMapMode('gmap');
+                  }}
                   className="min-h-[44px] bg-[#1b2024] border border-[#2c3338] rounded-md px-3 py-2 text-sm text-[#e7eaec]"
                 >
                   {SRC_IL.base.map((x, i) => (
@@ -426,40 +477,127 @@ export function CommandView({
               </div>
             </div>
 
-            {/* Offline pack summary card */}
-            <div className="md:col-span-2 bg-[#15191c] border border-[#2c3338] rounded-lg p-4">
+            {/* Offline pack + live sector preview card */}
+            <div className="md:col-span-2 bg-[#15191c] border border-[#2c3338] rounded-lg p-4 space-y-3">
               {selectedLoc && city ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-xs text-[#929ba2]">Selected</div>
-                    <div className="font-semibold text-sm text-[#e7eaec] mt-0.5">
-                      {selectedLoc.name}
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <div className="text-xs text-[#929ba2]">Selected</div>
+                      <div className="font-semibold text-sm text-[#e7eaec] mt-0.5">
+                        {selectedLoc.name}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-[#929ba2]">Centre</div>
+                      <div className="font-mono-tab font-semibold text-sm text-[#e7eaec] mt-0.5">
+                        {selectedLoc.ll}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-[#929ba2]">Area loaded</div>
+                      <div className="font-semibold text-sm text-[#e7eaec] mt-0.5 tabular-nums">
+                        600 × 400 m · {city.bl.length} buildings
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-[#929ba2]">Offline pack (L1 to L4)</div>
+                      <div className="font-semibold text-sm text-[#45c4ea] mt-0.5">
+                        1.24 GB · ready on field kit
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-[#929ba2]">Centre</div>
-                    <div className="font-mono-tab font-semibold text-sm text-[#e7eaec] mt-0.5">
-                      {selectedLoc.ll}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-[#929ba2]">Area loaded</div>
-                    <div className="font-semibold text-sm text-[#e7eaec] mt-0.5 tabular-nums">
-                      600 × 400 m · {city.bl.length} buildings
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-[#929ba2]">Offline pack (L1 to L4)</div>
-                    <div className="font-semibold text-sm text-[#45c4ea] mt-0.5">
-                      1.24 GB · ready on field kit
-                    </div>
-                  </div>
-                </div>
+                  <CommandLocationPreviewMap
+                    loc={selectedLoc}
+                    satellite={srcIdx === 2}
+                    searchedPin={searchedPlace}
+                  />
+                </>
               ) : (
                 <div className="text-xs text-[#929ba2]">
-                  Pick an Israeli location above to inspect the offline field-kit pack.
+                  Search any address on Google Maps or pick an offline location above to inspect the live Google Map, Street View, and sector grid.
                 </div>
               )}
+            </div>
+
+            {/* Google Drive attachments (Google Picker) */}
+            <div className="md:col-span-2 bg-[#15191c] border border-[#2c3338] rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-cond text-base font-semibold text-[#e7eaec]">
+                    Incident plans & briefs (Google Drive)
+                  </span>
+                  <StatusChip tone={driveFiles.length > 0 ? 'ok' : 'neutral'}>
+                    {driveFiles.length} attached
+                  </StatusChip>
+                </div>
+                <p className="text-xs text-[#929ba2] m-0">
+                  Use Google Picker to attach architectural plans, PDFs, or spreadsheets from your Google Drive.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {driveNeedsAuth ? (
+                  <GoogleSignInButton
+                    compact
+                    onClick={onGoogleSignIn}
+                    loading={driveSigningIn}
+                  />
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={drivePicking}
+                      onClick={() => onOpenPicker(null)}
+                      className="min-h-[36px] px-3 py-1.5 rounded-md bg-[#232a2f] border border-[#45c4ea]/70 hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer disabled:opacity-50"
+                    >
+                      {drivePicking ? 'Opening Picker…' : 'Pick from Google Drive'}
+                    </button>
+                    {driveFiles.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={onOpenDriveDrawer}
+                        className="min-h-[36px] px-3 py-1.5 rounded-md bg-[#1b2024] border border-[#2c3338] hover:border-[#46515a] text-xs text-[#929ba2] hover:text-white cursor-pointer"
+                      >
+                        Manage ({driveFiles.length})
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Google Meet briefings */}
+            <div className="md:col-span-2 bg-[#15191c] border border-[#2c3338] rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-cond text-base font-semibold text-[#e7eaec]">
+                    Command briefings (Google Meet)
+                  </span>
+                  <StatusChip tone={meetSpaces.length > 0 ? 'ok' : 'neutral'}>
+                    {meetSpaces.length} {meetSpaces.length === 1 ? 'room' : 'rooms'}
+                  </StatusChip>
+                </div>
+                <p className="text-xs text-[#929ba2] m-0">
+                  Launch and manage Google Meet briefing rooms and inspect recent call records.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {driveNeedsAuth ? (
+                  <GoogleSignInButton
+                    compact
+                    onClick={onGoogleSignIn}
+                    loading={driveSigningIn}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onOpenMeetDrawer}
+                    className="min-h-[36px] px-3 py-1.5 rounded-md bg-[#232a2f] border border-[#45c4ea]/70 hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer"
+                  >
+                    {meetSpaces.length > 0 ? `Open Meet rooms (${meetSpaces.length})` : 'Create Google Meet'}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="md:col-span-2">
@@ -527,13 +665,27 @@ export function CommandView({
                   <button
                     type="button"
                     onClick={() => setMapMode('gis')}
-                    className={`min-h-[40px] px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                    className={`min-h-[40px] px-3 py-1.5 text-xs font-medium border-r border-[#2c3338] cursor-pointer ${
                       mapMode === 'gis'
                         ? 'bg-[#2d3a42] text-white shadow-[inset_0_-2px_0_#45c4ea]'
                         : 'text-[#e7eaec]'
                     }`}
                   >
                     Map
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapMode('gmap');
+                      if (tool === 'poly') setTool('select');
+                    }}
+                    className={`min-h-[40px] px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                      mapMode === 'gmap'
+                        ? 'bg-[#2d3a42] text-white shadow-[inset_0_-2px_0_#45c4ea]'
+                        : 'text-[#e7eaec]'
+                    }`}
+                  >
+                    Google Satellite
                   </button>
                 </div>
 
@@ -560,10 +712,32 @@ export function CommandView({
                 )}
               </div>
 
+              {mapMode === 'gmap' && (
+                <div className="w-full h-full">
+                  <CommandStep2GoogleMap
+                    loc={selectedLoc}
+                    city={city}
+                    selectedIds={selectedRecord}
+                    poly={poly}
+                    polyClosed={polyClosed}
+                    onToggleBuilding={(id) => {
+                      setSel((prev) => {
+                        const next = new Map(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.set(id, 'c');
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+              )}
+
               <svg
                 ref={svgRef}
                 aria-label="Map of the event area"
-                className="w-full h-full block touch-none select-none cursor-crosshair"
+                className={`w-full h-full touch-none select-none cursor-crosshair ${
+                  mapMode === 'gmap' ? 'hidden' : 'block'
+                }`}
                 onWheel={(e) => {
                   e.preventDefault();
                   const svg = svgRef.current;

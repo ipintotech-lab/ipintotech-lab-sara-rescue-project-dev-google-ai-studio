@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { EventState, SeverityKey } from '../types/sara';
+import type { EventState, MeetSpaceItem, PickedDriveFile, SeverityKey } from '../types/sara';
 import {
   SEV,
   SRC_IL,
@@ -12,7 +12,6 @@ import {
   lays,
   loc3,
   msgsAt,
-  orderedHits,
   orthoV,
   pl,
   resStat,
@@ -28,6 +27,8 @@ import {
   worldSVG,
 } from '../sim/renderers';
 import { Canvas3DView } from './Canvas3DView';
+import { GoogleBuildingLocationMap, GoogleStreetViewPane } from './GoogleMapsPanes';
+import { GOOGLE_MAPS_API_KEY } from '../lib/mapsConfig';
 import { LayerStatusChip, SimulatedBadge, StatusChip } from './StatusChip';
 import { MessageCard } from './AreaView';
 
@@ -35,6 +36,15 @@ interface BuildingViewProps {
   ev: EventState;
   bid: number;
   t: number;
+  driveNeedsAuth: boolean;
+  driveSigningIn: boolean;
+  drivePicking: boolean;
+  driveFiles: PickedDriveFile[];
+  meetSpaces: MeetSpaceItem[];
+  onGoogleSignIn: () => void;
+  onOpenPicker: (buildingId: number) => void;
+  onOpenDriveDrawer: () => void;
+  onOpenMeetDrawer: () => void;
   onBackToArea: () => void;
   onOpenBuilding: (id: number) => void;
   onChangeSeverity: (id: number, sev: SeverityKey) => void;
@@ -44,12 +54,22 @@ interface BuildingViewProps {
   onRankBuilding: (id: number) => void;
   onUnrankBuilding: (id: number) => void;
   onSetRankReason: (id: number, reason: string) => void;
+  onConnectStarlink?: () => void;
 }
 
 export function BuildingView({
   ev,
   bid,
   t,
+  driveNeedsAuth,
+  driveSigningIn,
+  drivePicking,
+  driveFiles,
+  meetSpaces,
+  onGoogleSignIn,
+  onOpenPicker,
+  onOpenDriveDrawer,
+  onOpenMeetDrawer,
   onBackToArea,
   onOpenBuilding,
   onChangeSeverity,
@@ -59,6 +79,7 @@ export function BuildingView({
   onRankBuilding,
   onUnrankBuilding,
   onSetRankReason,
+  onConnectStarlink,
 }: BuildingViewProps) {
   const b = ev.city.bl[bid];
   const h = ev.H[bid];
@@ -69,6 +90,7 @@ export function BuildingView({
   const [autoRotate, setAutoRotate] = useState(false);
   const [selectedFloor, setSelectedFloor] = useState<number>(1);
   const [svSource, setSvSource] = useState<'m' | 'g'>('m');
+  const [locMapMode, setLocMapMode] = useState<'g' | 'v'>('g');
   const [editingReason, setEditingReason] = useState(false);
 
   const nowSvgRef = useRef<SVGSVGElement | null>(null);
@@ -205,7 +227,6 @@ export function BuildingView({
     );
   }
 
-  const ordered = useMemo(() => orderedHits(ev), [ev, ev.priorityOrder, ev.hits.length]);
   const rank = getBuildingRank(ev, bid);
   const reason = ev.priorityReasons[bid] ?? '';
   const layers = lays(ev, h, t);
@@ -243,7 +264,7 @@ export function BuildingView({
             }
           : null;
 
-  const gOk = t >= h.l4g;
+  const gOk = Boolean(GOOGLE_MAPS_API_KEY) || t >= h.l4g;
   const mOk = h.l4m != null && t >= h.l4m;
   const svReady = svSource === 'm' ? mOk : gOk;
 
@@ -251,6 +272,8 @@ export function BuildingView({
   const bMsgs = msgsAt(ev, t, bid);
   const detectedPhones = h.dev.filter((d) => t >= d.t2);
   const model = cmodel(b, h);
+  const buildingDriveFiles = driveFiles.filter((f) => f.buildingId === bid);
+  const buildingMeetRooms = meetSpaces.filter((s) => s.buildingId === bid);
 
   return (
     <div className="min-h-full pb-20 md:pb-8">
@@ -376,6 +399,17 @@ export function BuildingView({
               ))}
             </select>
           </label>
+
+          {/* Briefing Meet */}
+          <button
+            type="button"
+            onClick={onOpenMeetDrawer}
+            className="min-h-[34px] px-2.5 rounded-md bg-[#1b2024] border border-[#2c3338] hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer whitespace-nowrap"
+          >
+            {buildingMeetRooms.length > 0
+              ? `Meet briefing (${buildingMeetRooms.length})`
+              : 'Team Meet briefing'}
+          </button>
 
           {/* Prev / Next */}
           <div className="flex items-center gap-3 ml-auto text-sm font-medium">
@@ -555,7 +589,9 @@ export function BuildingView({
           <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#2c3338]">
             <div className="flex items-center gap-2 min-w-0">
               <h3 className="font-cond text-sm font-semibold text-[#e7eaec]">Location</h3>
-              <span className="text-xs text-[#929ba2] truncate">{SRC_IL.base[1]} · GIS</span>
+              <span className="text-xs text-[#929ba2] truncate">
+                {locMapMode === 'g' ? 'Google Maps' : `${SRC_IL.base[1]} · GIS`}
+              </span>
             </div>
             <div className="flex items-center gap-1.5">
               <SimulatedBadge />
@@ -563,7 +599,37 @@ export function BuildingView({
             </div>
           </header>
           <div className="relative min-h-0 overflow-hidden bg-[#0b0d0f]">
-            <svg ref={mapSvgRef} className="w-full h-full block" />
+            {t >= h.l1 && locMapMode === 'g' && (
+              <GoogleBuildingLocationMap ev={ev} bid={bid} onOpenBuilding={onOpenBuilding} />
+            )}
+            <svg
+              ref={mapSvgRef}
+              className={locMapMode === 'v' ? 'w-full h-full block' : 'hidden'}
+            />
+            <div className="absolute top-2 left-2 z-10 inline-flex border border-[#2c3338] rounded-md overflow-hidden bg-[#1b2024]/95">
+              <button
+                type="button"
+                onClick={() => setLocMapMode('g')}
+                className={`min-h-[28px] px-2 text-[11px] border-r border-[#2c3338] cursor-pointer ${
+                  locMapMode === 'g'
+                    ? 'bg-[#2d3a42] text-white shadow-[inset_0_-2px_0_#45c4ea]'
+                    : 'text-[#e7eaec]'
+                }`}
+              >
+                Google
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocMapMode('v')}
+                className={`min-h-[28px] px-2 text-[11px] cursor-pointer ${
+                  locMapMode === 'v'
+                    ? 'bg-[#2d3a42] text-white shadow-[inset_0_-2px_0_#45c4ea]'
+                    : 'text-[#e7eaec]'
+                }`}
+              >
+                Vector
+              </button>
+            </div>
             {t < h.l1 && (
               <WaitOverlay title="Loading from offline pack" sub="L1 base map" pct={null} />
             )}
@@ -600,9 +666,7 @@ export function BuildingView({
             <div className="flex items-center gap-2 min-w-0">
               <h3 className="font-cond text-sm font-semibold text-[#e7eaec]">Street view</h3>
               <span className="text-xs text-[#929ba2] truncate">
-                {svSource === 'm'
-                  ? 'Mapillary · offline cache'
-                  : `Google · pano CAoSL${(b.id * 7919).toString(36).toUpperCase()}…`}
+                {svSource === 'm' ? 'Mapillary · offline cache' : 'Google Street View'}
               </span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -615,16 +679,17 @@ export function BuildingView({
             </div>
           </header>
           <div className="relative min-h-0 overflow-hidden bg-[#0b0d0f]">
-            {svReady && (
+            {svReady && svSource === 'm' && (
               <svg
                 viewBox="0 0 400 240"
                 preserveAspectRatio="xMidYMid slice"
                 className="w-full h-full block"
                 dangerouslySetInnerHTML={{
-                  __html: facadeSVG(b, 400, 240, svSource === 'g'),
+                  __html: facadeSVG(b, 400, 240, false),
                 }}
               />
             )}
+            {svReady && svSource === 'g' && <GoogleStreetViewPane ev={ev} b={b} />}
             <div className="absolute top-2 left-2 z-10 inline-flex border border-[#2c3338] rounded-md overflow-hidden bg-[#1b2024]/95">
               <button
                 type="button"
@@ -659,6 +724,12 @@ export function BuildingView({
                     : 'From the offline cache'
                 }
                 pct={null}
+                actionLabel={
+                  svSource === 'g' && t < 25 && onConnectStarlink
+                    ? 'Connect Starlink (jump to T+26)'
+                    : undefined
+                }
+                onAction={svSource === 'g' && t < 25 ? onConnectStarlink : undefined}
               />
             )}
           </div>
@@ -734,6 +805,36 @@ export function BuildingView({
                 </button>
               );
             })}
+            <div className="ml-auto flex items-center gap-1.5 pl-2 shrink-0">
+              {driveNeedsAuth ? (
+                <button
+                  type="button"
+                  disabled={driveSigningIn}
+                  onClick={onGoogleSignIn}
+                  className="min-h-[32px] px-2.5 rounded border border-[#45c4ea]/60 bg-[#1b2024] hover:border-[#45c4ea] text-xs text-[#9be5fa] cursor-pointer whitespace-nowrap"
+                >
+                  {driveSigningIn ? 'Connecting…' : 'Sign in for Drive plans'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={drivePicking}
+                  onClick={() => onOpenPicker(bid)}
+                  className="min-h-[32px] px-2.5 rounded border border-[#45c4ea]/60 bg-[#1b2024] hover:border-[#45c4ea] text-xs text-[#9be5fa] cursor-pointer whitespace-nowrap"
+                >
+                  {drivePicking ? 'Opening Picker…' : '+ Drive plan'}
+                </button>
+              )}
+              {buildingDriveFiles.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenDriveDrawer}
+                  className="min-h-[32px] px-2 rounded border border-[#2c3338] bg-[#232a2f] text-xs text-[#e7eaec] cursor-pointer whitespace-nowrap"
+                >
+                  {buildingDriveFiles.length} attached
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
@@ -1020,11 +1121,15 @@ function WaitOverlay({
   sub,
   pct,
   translucent = false,
+  actionLabel,
+  onAction,
 }: {
   title: string;
   sub: string;
   pct: number | null;
   translucent?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div
@@ -1041,6 +1146,15 @@ function WaitOverlay({
             style={{ width: `${Math.round(pct * 100)}%` }}
           />
         </div>
+      )}
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-1 min-h-[32px] px-3 py-1 rounded bg-[#232a2f] border border-[#45c4ea]/70 hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer"
+        >
+          {actionLabel}
+        </button>
       )}
     </div>
   );

@@ -6,7 +6,9 @@ import type {
   AreaTab,
   Building,
   EventState,
+  MeetSpaceItem,
   OsintMessage,
+  PickedDriveFile,
   ReportFilter,
   SeverityKey,
 } from '../types/sara';
@@ -39,11 +41,22 @@ import {
   worldSVG,
 } from '../sim/renderers';
 import { Canvas3DView } from './Canvas3DView';
+import { GoogleAreaMap } from './GoogleMapsPanes';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { SeverityChip, SimulatedBadge, StatusChip } from './StatusChip';
 
 interface AreaViewProps {
   ev: EventState;
   t: number;
+  driveNeedsAuth: boolean;
+  driveSigningIn: boolean;
+  drivePicking: boolean;
+  driveFiles: PickedDriveFile[];
+  meetSpaces: MeetSpaceItem[];
+  onGoogleSignIn: () => void;
+  onOpenPicker: (buildingId?: number | null) => void;
+  onOpenDriveDrawer: () => void;
+  onOpenMeetDrawer: () => void;
   onOpenBuilding: (id: number) => void;
   onAddBuilding: (id: number, sev: SeverityKey) => void;
   onAssignTeam: (id: number, team: string | null) => void;
@@ -81,6 +94,15 @@ const TABS: [AreaTab, string][] = [
 export function AreaView({
   ev,
   t,
+  driveNeedsAuth,
+  driveSigningIn,
+  drivePicking,
+  driveFiles,
+  meetSpaces,
+  onGoogleSignIn,
+  onOpenPicker,
+  onOpenDriveDrawer,
+  onOpenMeetDrawer,
   onOpenBuilding,
   onAddBuilding,
   onAssignTeam,
@@ -160,7 +182,7 @@ export function AreaView({
   // Update SVG layers & dynamic overlays
   useEffect(() => {
     const svg = svgRef.current;
-    if (!svg || amode === '3d') return;
+    if (!svg || amode === '3d' || amode === 'gmap') return;
     const activeVb =
       vb || fitVB(svg, [ev.fb.x0 - 40, ev.fb.y0 - 40, ev.fb.x1 + 40, ev.fb.y1 + 40]);
     svg.setAttribute('viewBox', activeVb.join(' '));
@@ -268,6 +290,8 @@ export function AreaView({
     const f = ev.fb;
     if (amode === 'pre') return `Pre-disaster aerial · ${SRC_IL.base[ev.srcIdx]}`;
     if (amode === 'gis') return `GIS map · ${SRC_IL.b[ev.bsrcIdx]}`;
+    if (amode === 'gmap')
+      return 'Google Maps · simulated C2 buildings, priority & IMSI overlays (Demo only)';
     if (amode === '3d')
       return '3D area context (L6b) · drag to rotate, scroll/pinch to zoom. Phones shown as magenta points.';
     if (t < f.T0) return `Mapping drone launches at ${fT(f.T0)} · showing pre-disaster aerial`;
@@ -368,6 +392,7 @@ export function AreaView({
                   ['swipe', 'Swipe compare'],
                   ['pre', 'Pre-disaster'],
                   ['gis', 'GIS map'],
+                  ['gmap', 'Google Maps'],
                   ['3d', '3D area'],
                 ] as [AreaMode, string][]
               ).map(([m, label]) => (
@@ -399,12 +424,12 @@ export function AreaView({
             ref={svgRef}
             aria-label="Area map"
             className={`w-full h-full touch-none select-none ${
-              amode === '3d' ? 'hidden' : 'block'
+              amode === '3d' || amode === 'gmap' ? 'hidden' : 'block'
             }`}
             onWheel={(e) => {
               e.preventDefault();
               const svg = svgRef.current;
-              if (!svg || amode === '3d') return;
+              if (!svg || amode === '3d' || amode === 'gmap') return;
               const cur =
                 vb || fitVB(svg, [ev.fb.x0 - 40, ev.fb.y0 - 40, ev.fb.x1 + 40, ev.fb.y1 + 40]);
               const p = svgPt(svg, e.clientX, e.clientY);
@@ -479,6 +504,18 @@ export function AreaView({
             }}
           />
 
+          {/* Live Google Maps Area View */}
+          {amode === 'gmap' && (
+            <div className="w-full h-full">
+              <GoogleAreaMap
+                ev={ev}
+                t={t}
+                layers={layers}
+                onOpenBuilding={onOpenBuilding}
+              />
+            </div>
+          )}
+
           {/* 3D Area Canvas */}
           {amode === '3d' && (
             <div className="w-full h-full">
@@ -490,31 +527,45 @@ export function AreaView({
           )}
 
           {/* Status Overlay */}
-          <div className="absolute right-2.5 top-14 z-10 bg-[#0a0c0e]/90 border border-[#2c3338] rounded-md px-3 py-2 text-xs text-[#e7eaec] max-w-[300px] pointer-events-none">
-            {amode === 'swipe' && (
-              <div className="font-semibold text-[#45c4ea] mb-0.5">
-                Swipe: left pre-disaster, right current. Drag handle.
-              </div>
-            )}
-            <div>{statusBanner}</div>
-          </div>
+          {amode !== 'gmap' && (
+            <div className="absolute right-2.5 top-14 z-10 bg-[#0a0c0e]/90 border border-[#2c3338] rounded-md px-3 py-2 text-xs text-[#e7eaec] max-w-[300px] pointer-events-none">
+              {amode === 'swipe' && (
+                <div className="font-semibold text-[#45c4ea] mb-0.5">
+                  Swipe: left pre-disaster, right current. Drag handle.
+                </div>
+              )}
+              <div>{statusBanner}</div>
+            </div>
+          )}
 
-          {/* Layer Panel (collapsible on mobile, always accessible) */}
+          {/* Layer Panel (collapsible on mobile and gmap mode; always accessible) */}
           {amode !== '3d' && (
-            <div className="absolute left-2.5 bottom-2.5 z-10">
+            <div
+              className={`absolute z-10 ${
+                amode === 'gmap' ? 'right-2.5 top-14 flex flex-col items-end' : 'left-2.5 bottom-2.5'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => setLayersOpen((o) => !o)}
-                className="lg:hidden min-h-[40px] px-3 py-2 rounded-md bg-[#0a0c0e]/95 border border-[#2c3338] text-xs font-medium text-[#e7eaec] flex items-center gap-1.5"
+                className={`${
+                  amode === 'gmap' ? 'flex min-h-[34px] px-2.5 py-1' : 'lg:hidden min-h-[40px] px-3 py-2 flex'
+                } rounded-md bg-[#0a0c0e]/95 border border-[#2c3338] hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] items-center gap-1.5 cursor-pointer shadow`}
               >
-                <Layers className="w-4 h-4 text-[#45c4ea]" />
+                <Layers className="w-3.5 h-3.5 text-[#45c4ea]" />
                 Layers
               </button>
 
               <div
                 className={`${
-                  layersOpen ? 'grid' : 'hidden lg:grid'
-                } mt-1.5 lg:mt-0 bg-[#0a0c0e]/92 border border-[#2c3338] rounded-lg p-3 gap-1 text-xs`}
+                  amode === 'gmap'
+                    ? layersOpen
+                      ? 'grid mt-1.5 shadow-2xl'
+                      : 'hidden'
+                    : layersOpen
+                      ? 'grid mt-1.5 lg:mt-0'
+                      : 'hidden lg:grid mt-1.5 lg:mt-0'
+                } bg-[#0a0c0e]/95 border border-[#2c3338] rounded-lg p-3 gap-1 text-xs`}
               >
                 {LAYER_DEFS.map(([k, label, col]) => (
                   <label
@@ -539,7 +590,7 @@ export function AreaView({
           )}
 
           {/* Zoom Controls */}
-          {amode !== '3d' && (
+          {amode !== '3d' && amode !== 'gmap' && (
             <div className="absolute right-2.5 bottom-2.5 z-10 flex flex-col gap-1">
               <button
                 type="button"
@@ -569,7 +620,7 @@ export function AreaView({
           )}
 
           {/* Hover Tooltip (desktop) */}
-          {hoverB && hoverPos && amode !== '3d' && !addPopup && (
+          {hoverB && hoverPos && amode !== '3d' && amode !== 'gmap' && !addPopup && (
             <div
               className="hidden md:block fixed z-30 pointer-events-none bg-[#0a0c0e]/95 border border-[#2c3338] rounded-md px-3 py-2 text-xs max-w-[260px]"
               style={{ left: hoverPos.x + 14, top: hoverPos.y + 14 }}
@@ -1285,6 +1336,72 @@ export function AreaView({
                       ) : (
                         <div className="text-xs text-[#929ba2]">Queue empty</div>
                       )}
+                    </div>
+                    <div className="bg-[#1b2024] border border-[#2c3338] rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <b className="font-cond text-sm text-[#e7eaec]">
+                          Google Drive files (Google Picker)
+                        </b>
+                        <StatusChip tone="ok">{driveFiles.length} linked</StatusChip>
+                      </div>
+                      <div className="text-xs text-[#929ba2]">
+                        Attach real plans, spreadsheets, or field briefs from Google Drive.
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {driveNeedsAuth ? (
+                          <GoogleSignInButton
+                            compact
+                            onClick={onGoogleSignIn}
+                            loading={driveSigningIn}
+                          />
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={drivePicking}
+                              onClick={() => onOpenPicker(null)}
+                              className="min-h-[32px] px-2.5 py-1 rounded bg-[#232a2f] border border-[#45c4ea]/70 hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer disabled:opacity-50"
+                            >
+                              {drivePicking ? 'Opening Picker…' : 'Open Google Picker'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={onOpenDriveDrawer}
+                              className="min-h-[32px] px-2.5 py-1 rounded bg-[#15191c] border border-[#2c3338] text-xs text-[#929ba2] hover:text-white cursor-pointer"
+                            >
+                              View files ({driveFiles.length})
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-[#1b2024] border border-[#2c3338] rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <b className="font-cond text-sm text-[#e7eaec]">
+                          Command briefings (Google Meet)
+                        </b>
+                        <StatusChip tone="ok">{meetSpaces.length} rooms</StatusChip>
+                      </div>
+                      <div className="text-xs text-[#929ba2]">
+                        Launch team briefing rooms and inspect conference status.
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {driveNeedsAuth ? (
+                          <GoogleSignInButton
+                            compact
+                            onClick={onGoogleSignIn}
+                            loading={driveSigningIn}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={onOpenMeetDrawer}
+                            className="min-h-[32px] px-2.5 py-1 rounded bg-[#232a2f] border border-[#45c4ea]/70 hover:border-[#45c4ea] text-xs font-medium text-[#e7eaec] cursor-pointer"
+                          >
+                            {meetSpaces.length > 0 ? `Manage Meet (${meetSpaces.length})` : 'Create Google Meet'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

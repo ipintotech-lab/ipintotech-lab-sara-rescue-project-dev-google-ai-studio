@@ -8,7 +8,7 @@ export type EventType =
 
 export type ViewRoute = 'command' | 'area' | 'building';
 
-export type AreaMode = 'now' | 'swipe' | 'pre' | 'gis' | '3d';
+export type AreaMode = 'now' | 'swipe' | 'pre' | 'gis' | 'gmap' | '3d';
 
 export type AreaTab =
   | 'prio'
@@ -25,9 +25,12 @@ export interface LocationPack {
   id: string;
   name: string;
   city: string;
-  cc: 'IL';
+  cc: string;
   seed: number;
   ll: string;
+  lat?: number;
+  lng?: number;
+  countryLabel?: string;
   h: string[];
   v: string[];
 }
@@ -218,3 +221,45 @@ export interface AreaLayersToggle {
   drone: boolean;
   teams: boolean;
 }
+
+export interface PickedDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  url: string | null;
+  iconUrl: string | null;
+  sizeBytes?: number;
+  lastEditedUtc?: number;
+  modifiedTime?: string;
+  ownerName?: string;
+  buildingId: number | null;
+  buildingAddr?: string;
+  attachedAt: string;
+}
+
+export type MeetAccessType = 'OPEN' | 'TRUSTED' | 'RESTRICTED';
+
+export type MeetModerationMode = 'ON' | 'OFF';
+
+export interface MeetSpaceItem {
+  name: string;
+  meetingUri: string | null;
+  meetingCode: string;
+  accessType: MeetAccessType;
+  moderation: MeetModerationMode;
+  activeConferenceRecord?: string;
+  buildingId: number | null;
+  buildingAddr?: string;
+  label: string;
+  createdAt: string;
+}
+
+export interface MeetConferenceSummary {
+  name: string;
+  space: string;
+  startTime?: string;
+  endTime?: string;
+  participantCount?: number;
+}
+
+
