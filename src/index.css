@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0e1113;
+  --p1: #15191c;
+  --p2: #1b2024;
+  --p3: #232a2f;
+  --ln: #2c3338;
+  --ink: #e7eaec;
+  --mu: #929ba2;
+  --or: #ff6a2b;
+  --mg: #ff3fa4;
+  --cy: #45c4ea;
+  --yl: #f2d14e;
+  --sc: #ff4d2e;
+  --sp: #ff9a3c;
+  --sd: #f2d14e;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.font-cond {
+  font-family: 'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif;
+}
+
+.font-mono-tab {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom sleek dark scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2c3338;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3e484f;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

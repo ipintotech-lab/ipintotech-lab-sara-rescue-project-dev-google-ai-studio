@@ -1,0 +1,6 @@
+{
+  "name": "SARA C2 Demo",
+  "description": "Interactive web and mobile command-post console demo for urban search and rescue operations in Israel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
